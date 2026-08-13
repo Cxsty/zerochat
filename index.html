@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZeroChat</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: #0d0d0d;
+            color: #d4d4d4;
+            font-family: Consolas, "Courier New", monospace;
+        }
+
+        .app {
+            width: min(680px, 100%);
+            margin: 0 auto;
+            padding: 32px 20px;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #252525;
+            margin-bottom: 28px;
+        }
+
+        h1 {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+            color: #f0f0f0;
+        }
+
+        h2 {
+            font-size: 14px;
+            font-weight: 600;
+            margin: 0 0 18px;
+            color: #c8c8c8;
+        }
+
+        #status {
+            font-size: 12px;
+            color: #666;
+            white-space: nowrap;
+        }
+
+        #status.online {
+            color: #78b878;
+        }
+
+        section {
+            border: 1px solid #252525;
+            background: #111111;
+            padding: 20px;
+        }
+
+        input {
+            width: 100%;
+            height: 38px;
+            padding: 0 10px;
+            margin-bottom: 10px;
+            background: #0b0b0b;
+            border: 1px solid #303030;
+            color: #ddd;
+            font-family: inherit;
+            font-size: 13px;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: #555;
+        }
+
+        button {
+            height: 36px;
+            padding: 0 14px;
+            background: #181818;
+            border: 1px solid #353535;
+            color: #ccc;
+            font-family: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #202020;
+            border-color: #4a4a4a;
+        }
+
+        #refreshRooms {
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        #userList {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .user {
+            padding: 12px;
+            border: 1px solid #252525;
+            background: #151515;
+            color: #bbb;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .user:hover {
+            background: #1b1b1b;
+            border-color: #3a3a3a;
+        }
+
+        .empty {
+            color: #555;
+            font-size: 12px;
+            padding: 8px 0;
+        }
+
+        .create-room {
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .chat-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #252525;
+        }
+
+        .chat-header h2 {
+            margin: 0;
+        }
+
+        #back {
+            width: 36px;
+            padding: 0;
+        }
+
+        #messages {
+            height: 340px;
+            overflow-y: auto;
+            margin: 14px 0;
+            padding: 12px;
+            background: #0b0b0b;
+            border: 1px solid #202020;
+            font-size: 13px;
+        }
+
+        .message {
+            margin-bottom: 10px;
+            line-height: 1.5;
+        }
+
+        .message strong {
+            color: #888;
+            font-weight: normal;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .input-row input {
+            margin: 0;
+            flex: 1;
+        }
+
+        #secure {
+            width: 100%;
+            margin-top: 10px;
+            color: #9ac79a;
+            border-color: #315031;
+        }
+
+        #secure:hover {
+            background: #142014;
+            border-color: #426642;
+        }
+    </style>
+</head>
+
+<body>
+    <main class="app">
+        <header>
+            <h1>ZeroChat</h1>
+            <span id="status">Offline</span>
+        </header>
+
+        <section id="login">
+            <h2>Identity</h2>
+
+            <input
+                id="username"
+                type="text"
+                maxlength="32"
+                placeholder="username"
+                autocomplete="off"
+            >
+
+            <button id="enter">Enter</button>
+        </section>
+
+        <section id="users" hidden>
+            <h2>Trust Rooms</h2>
+
+            <div id="userList"></div>
+
+            <button id="refreshRooms">Refresh Rooms</button>
+        </section>
+
+        <section id="chat" hidden>
+            <div class="chat-header">
+                <button id="back">Back</button>
+                <h2 id="chatUser"></h2>
+            </div>
+
+            <div id="messages"></div>
+
+            <div class="input-row">
+                <input
+                    id="message"
+                    type="text"
+                    placeholder="message"
+                    autocomplete="off"
+                >
+
+                <button id="send">Send</button>
+            </div>
+
+            <button id="secure">Start Secure Chat</button>
+        </section>
+    </main>
+
+    <script>
+        window.zeroChatPolling = {
+            count: 0,
+            lastMode: "",
+            lastChatState: false
+        };
+
+        const zeroChatOriginalFetch = window.fetch;
+
+        window.fetch = async function(...args) {
+            const response = await zeroChatOriginalFetch.apply(this, args);
+
+            try {
+                const input = args[0];
+                const url = typeof input === "string"
+                    ? new URL(input, window.location.href)
+                    : new URL(input.url, window.location.href);
+
+                const isPolling =
+                    response.ok &&
+                    (
+                        (url.pathname === "/rooms" && !url.search) ||
+                        (url.pathname === "/room" && url.searchParams.has("room")) ||
+                        (url.pathname === "/signals" && url.searchParams.has("username"))
+                    );
+
+                if (isPolling) {
+                    window.zeroChatPolling.count++;
+                    updateZeroChatPollingStatus();
+                }
+            } catch (error) {
+                console.error(error);
+            }
+
+            return response;
+        };
+
+        function updateZeroChatPollingStatus() {
+            const status = document.getElementById("status");
+            const login = document.getElementById("login");
+            const users = document.getElementById("users");
+            const chat = document.getElementById("chat");
+
+            if (!status) {
+                return;
+            }
+
+            if (!login || !users || !chat) {
+                return;
+            }
+
+            if (!status.classList.contains("online")) {
+                return;
+            }
+
+            if (!chat.hidden) {
+                if (!window.zeroChatPolling.lastChatState) {
+                    window.zeroChatPolling.count = 0;
+                }
+
+                window.zeroChatPolling.lastChatState = true;
+                status.textContent =
+                    `Online · Polling ${window.zeroChatPolling.count}`;
+                return;
+            }
+
+            window.zeroChatPolling.lastChatState = false;
+            status.textContent = "Online · Polling off";
+        }
+
+        const zeroChatStatusObserver = new MutationObserver(() => {
+            updateZeroChatPollingStatus();
+        });
+
+        document.addEventListener("DOMContentLoaded", () => {
+            const status = document.getElementById("status");
+            const chat = document.getElementById("chat");
+            const users = document.getElementById("users");
+
+            if (status) {
+                zeroChatStatusObserver.observe(status, {
+                    attributes: true,
+                    attributeFilter: ["class"]
+                });
+            }
+
+            if (chat) {
+                zeroChatStatusObserver.observe(chat, {
+                    attributes: true,
+                    attributeFilter: ["hidden"]
+                });
+            }
+
+            if (users) {
+                zeroChatStatusObserver.observe(users, {
+                    attributes: true,
+                    attributeFilter: ["hidden"]
+                });
+            }
+
+            setTimeout(updateZeroChatPollingStatus, 0);
+        });
+    </script>
+
+    <script src="app.js"></script>
+
+    <script>
+        setInterval(updateZeroChatPollingStatus, 250);
+    </script>
+</body>
+</html>
