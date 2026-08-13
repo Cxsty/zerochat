@@ -18,6 +18,7 @@ const sendButton = document.getElementById("send");
 
 const backButton = document.getElementById("back");
 const secureButton = document.getElementById("secure");
+const pollingStatus = document.getElementById("polling");
 
 const rtcConfig = {
     iceServers: [
@@ -32,6 +33,9 @@ const IDENTITY_STORE = "identity";
 const IDENTITY_KEY = "current";
 const IDENTITY_LIFETIME = 60 * 60 * 1000;
 
+const ROOM_POLL_INTERVAL = 3000;
+const SIGNAL_POLL_INTERVAL = 500;
+
 let username = "";
 let currentRoom = "";
 let roomPartner = "";
@@ -43,6 +47,8 @@ let channel = null;
 
 let roomPoll = null;
 let signalPoll = null;
+let pollingCountdownTimer = null;
+let pollingCountdown = 3;
 
 let renderedRoomMessages = 0;
 let secureConnectionMessageShown = false;
@@ -188,17 +194,6 @@ async function deleteStoredIdentity() {
     });
 }
 
-function arrayBufferToBase64(buffer) {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-
-    for (const byte of bytes) {
-        binary += String.fromCharCode(byte);
-    }
-
-    return btoa(binary);
-}
-
 async function fingerprintPublicKey(publicKey) {
     const exported = await crypto.subtle.exportKey("spki", publicKey);
     const hash = await crypto.subtle.digest("SHA-256", exported);
@@ -307,6 +302,54 @@ function showIdentityNotice() {
     login.appendChild(notice);
 }
 
+function setPollingStatus(value) {
+    if (!pollingStatus) {
+        return;
+    }
+
+    pollingStatus.textContent = value;
+}
+
+function startPollingCountdown() {
+    stopPollingCountdown();
+
+    pollingCountdown = 3;
+    setPollingStatus(`Polling: ${pollingCountdown}`);
+
+    pollingCountdownTimer = setInterval(() => {
+        if (!currentRoom || secureConnected) {
+            stopPollingCountdown();
+            return;
+        }
+
+        pollingCountdown--;
+
+        if (pollingCountdown < 1) {
+            pollingCountdown = 3;
+        }
+
+        setPollingStatus(`Polling: ${pollingCountdown}`);
+    }, 1000);
+}
+
+function resetPollingCountdown() {
+    if (!currentRoom || secureConnected) {
+        return;
+    }
+
+    pollingCountdown = 3;
+    setPollingStatus(`Polling: ${pollingCountdown}`);
+}
+
+function stopPollingCountdown() {
+    if (pollingCountdownTimer) {
+        clearInterval(pollingCountdownTimer);
+        pollingCountdownTimer = null;
+    }
+
+    setPollingStatus("Polling: Off");
+}
+
 async function enterZeroChat() {
     const name = usernameInput.value.trim();
 
@@ -358,6 +401,7 @@ async function enterZeroChat() {
         users.hidden = false;
 
         setOnline(true);
+        stopPollingCountdown();
 
         await updateLobby();
     } catch (error) {
@@ -385,6 +429,8 @@ async function updateLobby() {
     if (!username || currentRoom) {
         return;
     }
+
+    stopPollingCountdown();
 
     try {
         const data = await request("/rooms");
@@ -526,6 +572,7 @@ function openRoom(partner) {
     clearTimeout(signalPoll);
     signalPoll = null;
 
+    startPollingCountdown();
     startSignalPolling();
     pollRoom();
 }
@@ -622,8 +669,9 @@ async function pollRoom() {
         console.error(error);
     }
 
-    if (currentRoom) {
-        roomPoll = setTimeout(pollRoom, 3000);
+    if (currentRoom && !secureConnected) {
+        resetPollingCountdown();
+        roomPoll = setTimeout(pollRoom, ROOM_POLL_INTERVAL);
     }
 }
 
@@ -791,6 +839,8 @@ function createPeer() {
             clearTimeout(signalPoll);
             signalPoll = null;
 
+            stopPollingCountdown();
+
             secureButton.textContent = "Established";
             secureButton.disabled = true;
 
@@ -816,6 +866,10 @@ function createPeer() {
                 "system",
                 "P2P connection failed."
             );
+
+            if (currentRoom) {
+                startPollingCountdown();
+            }
         }
     });
 
@@ -882,7 +936,7 @@ async function pollSignals() {
     }
 
     if (currentRoom && !secureConnected) {
-        signalPoll = setTimeout(pollSignals, 500);
+        signalPoll = setTimeout(pollSignals, SIGNAL_POLL_INTERVAL);
     } else {
         signalPoll = null;
     }
@@ -988,6 +1042,8 @@ async function leaveRoom() {
     clearTimeout(signalPoll);
     signalPoll = null;
 
+    stopPollingCountdown();
+
     try {
         await request("/room/leave", {
             method: "POST",
@@ -1033,6 +1089,8 @@ function leaveLocalRoom() {
     clearTimeout(signalPoll);
     signalPoll = null;
 
+    stopPollingCountdown();
+
     closePeer();
 
     roomPartner = "";
@@ -1070,3 +1128,5 @@ function closePeer() {
 }
 
 showIdentityNotice();
+
+setPollingStatus("Polling: Off");
