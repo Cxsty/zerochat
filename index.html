@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZeroChat</title>
-
     <style>
         * {
             box-sizing: border-box;
@@ -46,6 +45,12 @@
             color: #c8c8c8;
         }
 
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
         #status {
             font-size: 12px;
             color: #666;
@@ -54,6 +59,12 @@
 
         #status.online {
             color: #78b878;
+        }
+
+        #polling {
+            font-size: 12px;
+            color: #666;
+            white-space: nowrap;
         }
 
         section {
@@ -191,12 +202,14 @@
         }
     </style>
 </head>
-
 <body>
     <main class="app">
         <header>
             <h1>ZeroChat</h1>
-            <span id="status">Offline</span>
+            <div class="status-bar">
+                <span id="status">Offline</span>
+                <span id="polling">Polling: Off</span>
+            </div>
         </header>
 
         <section id="login">
@@ -244,114 +257,6 @@
         </section>
     </main>
 
-    <script>
-        window.zeroChatPolling = {
-            count: 0,
-            lastMode: "",
-            lastChatState: false
-        };
-
-        const zeroChatOriginalFetch = window.fetch;
-
-        window.fetch = async function(...args) {
-            const response = await zeroChatOriginalFetch.apply(this, args);
-
-            try {
-                const input = args[0];
-                const url = typeof input === "string"
-                    ? new URL(input, window.location.href)
-                    : new URL(input.url, window.location.href);
-
-                const isPolling =
-                    response.ok &&
-                    (
-                        (url.pathname === "/rooms" && !url.search) ||
-                        (url.pathname === "/room" && url.searchParams.has("room")) ||
-                        (url.pathname === "/signals" && url.searchParams.has("username"))
-                    );
-
-                if (isPolling) {
-                    window.zeroChatPolling.count++;
-                    updateZeroChatPollingStatus();
-                }
-            } catch (error) {
-                console.error(error);
-            }
-
-            return response;
-        };
-
-        function updateZeroChatPollingStatus() {
-            const status = document.getElementById("status");
-            const login = document.getElementById("login");
-            const users = document.getElementById("users");
-            const chat = document.getElementById("chat");
-
-            if (!status) {
-                return;
-            }
-
-            if (!login || !users || !chat) {
-                return;
-            }
-
-            if (!status.classList.contains("online")) {
-                return;
-            }
-
-            if (!chat.hidden) {
-                if (!window.zeroChatPolling.lastChatState) {
-                    window.zeroChatPolling.count = 0;
-                }
-
-                window.zeroChatPolling.lastChatState = true;
-                status.textContent =
-                    `Online · Polling ${window.zeroChatPolling.count}`;
-                return;
-            }
-
-            window.zeroChatPolling.lastChatState = false;
-            status.textContent = "Online · Polling off";
-        }
-
-        const zeroChatStatusObserver = new MutationObserver(() => {
-            updateZeroChatPollingStatus();
-        });
-
-        document.addEventListener("DOMContentLoaded", () => {
-            const status = document.getElementById("status");
-            const chat = document.getElementById("chat");
-            const users = document.getElementById("users");
-
-            if (status) {
-                zeroChatStatusObserver.observe(status, {
-                    attributes: true,
-                    attributeFilter: ["class"]
-                });
-            }
-
-            if (chat) {
-                zeroChatStatusObserver.observe(chat, {
-                    attributes: true,
-                    attributeFilter: ["hidden"]
-                });
-            }
-
-            if (users) {
-                zeroChatStatusObserver.observe(users, {
-                    attributes: true,
-                    attributeFilter: ["hidden"]
-                });
-            }
-
-            setTimeout(updateZeroChatPollingStatus, 0);
-        });
-    </script>
-
     <script src="app.js"></script>
-
-    <script>
-        setInterval(updateZeroChatPollingStatus, 250);
-    </script>
 </body>
 </html>
