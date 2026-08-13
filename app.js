@@ -7,6 +7,7 @@ const chat = document.getElementById("chat");
 const usernameInput = document.getElementById("username");
 const enterButton = document.getElementById("enter");
 const status = document.getElementById("status");
+const pollingStatus = document.getElementById("polling");
 const userList = document.getElementById("userList");
 const refreshRoomsButton = document.getElementById("refreshRooms");
 
@@ -18,7 +19,6 @@ const sendButton = document.getElementById("send");
 
 const backButton = document.getElementById("back");
 const secureButton = document.getElementById("secure");
-const pollingStatus = document.getElementById("polling");
 
 const rtcConfig = {
     iceServers: [
@@ -131,6 +131,7 @@ async function getStoredIdentity() {
 
         request.onsuccess = () => {
             const value = request.result;
+
             db.close();
 
             if (!value || value.expiresAt <= Date.now()) {
@@ -268,17 +269,6 @@ async function loadIdentity() {
     return stored;
 }
 
-function identityFingerprintShort() {
-    if (!identity) {
-        return "";
-    }
-
-    return identity.fingerprint
-        .slice(0, 16)
-        .match(/.{1,4}/g)
-        .join(" ");
-}
-
 function showIdentityNotice() {
     const existing = document.getElementById("identityNotice");
 
@@ -303,20 +293,33 @@ function showIdentityNotice() {
 }
 
 function setPollingStatus(value) {
-    if (!pollingStatus) {
-        return;
-    }
-
     pollingStatus.textContent = value;
 }
 
-function startPollingCountdown() {
-    stopPollingCountdown();
+function stopPollingCountdown() {
+    if (pollingCountdownTimer) {
+        clearTimeout(pollingCountdownTimer);
+        pollingCountdownTimer = null;
+    }
 
     pollingCountdown = 3;
-    setPollingStatus(`Polling: ${pollingCountdown}`);
+    setPollingStatus("Polling: Off");
+}
 
-    pollingCountdownTimer = setInterval(() => {
+function startPollingCountdown() {
+    if (!currentRoom || secureConnected) {
+        stopPollingCountdown();
+        return;
+    }
+
+    if (pollingCountdownTimer) {
+        clearTimeout(pollingCountdownTimer);
+    }
+
+    pollingCountdown = 3;
+    setPollingStatus("Polling: 3");
+
+    const tick = () => {
         if (!currentRoom || secureConnected) {
             stopPollingCountdown();
             return;
@@ -324,30 +327,19 @@ function startPollingCountdown() {
 
         pollingCountdown--;
 
-        if (pollingCountdown < 1) {
-            pollingCountdown = 3;
+        if (pollingCountdown <= 0) {
+            pollingCountdownTimer = null;
+            setPollingStatus("Polling: 0");
+            pollRoom();
+            return;
         }
 
         setPollingStatus(`Polling: ${pollingCountdown}`);
-    }, 1000);
-}
 
-function resetPollingCountdown() {
-    if (!currentRoom || secureConnected) {
-        return;
-    }
+        pollingCountdownTimer = setTimeout(tick, 1000);
+    };
 
-    pollingCountdown = 3;
-    setPollingStatus(`Polling: ${pollingCountdown}`);
-}
-
-function stopPollingCountdown() {
-    if (pollingCountdownTimer) {
-        clearInterval(pollingCountdownTimer);
-        pollingCountdownTimer = null;
-    }
-
-    setPollingStatus("Polling: Off");
+    pollingCountdownTimer = setTimeout(tick, 1000);
 }
 
 async function enterZeroChat() {
@@ -572,13 +564,14 @@ function openRoom(partner) {
     clearTimeout(signalPoll);
     signalPoll = null;
 
-    startPollingCountdown();
+    stopPollingCountdown();
     startSignalPolling();
-    pollRoom();
+    startPollingCountdown();
 }
 
 async function pollRoom() {
-    if (!currentRoom) {
+    if (!currentRoom || secureConnected) {
+        stopPollingCountdown();
         return;
     }
 
@@ -670,8 +663,9 @@ async function pollRoom() {
     }
 
     if (currentRoom && !secureConnected) {
-        resetPollingCountdown();
-        roomPoll = setTimeout(pollRoom, ROOM_POLL_INTERVAL);
+        startPollingCountdown();
+    } else {
+        stopPollingCountdown();
     }
 }
 
@@ -1099,6 +1093,10 @@ function leaveLocalRoom() {
     roomClosingMessageShown = false;
     secureConnected = false;
 
+    delete messages.dataset.partnerAccepted;
+    delete messages.dataset.userAccepted;
+    delete messages.dataset.connectionStarting;
+
     secureButton.disabled = false;
     secureButton.textContent = "Start Secure Chat";
 
@@ -1128,5 +1126,4 @@ function closePeer() {
 }
 
 showIdentityNotice();
-
 setPollingStatus("Polling: Off");
